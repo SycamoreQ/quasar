@@ -90,3 +90,7 @@ class ReturnDecUpdate extends Bundle {
   val idx = new RetStackIdx
   val addr = UInt(31.W)
 }
+
+object BH_BranchType extends ChiselEnum {
+  val JUMP, IJUMP, CALL, ICALL, BRANCH, PAD0, PAD1, RETURN = Value
+}

@@ -31,7 +31,7 @@ class RetStackIdx extends Bundle {
 }
 
 object HistAct extends ChiselEnum{
-  val HIST_NONE, HIST_PUSH, HIST_POP = Value;
+  val HIST_NONE, HIST_PUSH, HIST_POP , HIST_APPEND_1 = Value;
 }
 
 object RetAct extends ChiselEnum {
@@ -45,6 +45,16 @@ object BranchTgtSpec extends ChiselEnum {
 object IFetchFault extends ChiselEnum {
   val IF_FAULT_NONE, IF_INTERRUPT, IF_PAGE_FAULT, IF_ACCESS_FAULT = Value;
 }
+
+class Branch extends Bundle {
+  val target = UInt(32.W)
+  val pc = UInt(32.W)
+  val fhPC = UInt(32.W)
+  val btype = BranchType()
+  val compr = Bool()
+  val valid = Bool()
+}
+
 
 class RecoveryInfo {
   val fetchid = new FetchID
@@ -96,6 +106,7 @@ class BTUpdate extends Bundle {
   val taken = Bool()
   val compr = Bool()
   val clean = Bool()
+  val fetchStartOffs = new FetchOff
   val multiple = Bool()
   val multipleOffs = new FetchOff
   val isBranch = Bool()
@@ -125,7 +136,7 @@ class PredBranch extends Bundle {
   val isBranch = Bool()
   val isCall = Bool()
   val isReturn = Bool()
-  val btype = Bool()
+  val btype = BranchType()
   val offs = new FetchOff
   val multiple = Bool()
   val dirOnly = Bool()
@@ -207,6 +218,11 @@ class BPBackup extends Bundle {
   val altPred = Bool()             // TAGE alternate prediction
 }
 
-class Write {
-  val addr = RegInit(
+class IFetchOp extends Bundle  {
+   val fetchid = new FetchID
+   val pc = UInt(32.W)
+   val predBr = new PredBranch
+   val rIdx = new RetStackIdx( )
+   val lastValid  = new FetchOff()
+   val predRetAddr = UInt(32.W)
 }
