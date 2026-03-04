@@ -9,16 +9,16 @@ TODO:
 
 - A more farther goal is to integrate AXI system bus inspired and used in the Coral NPU
 
-Advancement 1 — Set Associativity (2-way or 4-way) with tree-PLRU
+Advancement 1 — Set Associativity (2-way or 4-way) with tree-PLRU  --- DONE (possible issues exist)
 Touch IDirectCache. Duplicate tagMem, validMem, dataMem into a Vec(NUM_WAYS, ...). Hit becomes an OR across all ways. 
 Add a plruBits RegInit array — 1 bit per set for 2-way, 3 bits per set for 4-way. On hit, update the PLRU tree toward the hit way. On miss, evict the way pointed to by the PLRU root. In ICacheController,
 read PLRU bits during sREAD, register the victim way, and use it throughout sALLOCATE.
 
-Advancement 2 — fetchID Tagging and Misprediction Flush
+Advancement 2 — fetchID Tagging and Misprediction Flush   ---- DONE (NO issue)
 Touch ICacheController. Add inputs fetchID: FetchID, flushFetchID: FetchID, and flush: Bool. Register the fetchID of the request currently in sALLOCATE. On flush, if the in-flight fetchID is older than flushFetchID, abort the fill — return to sREAD, 
 reset cntWords, and suppress cache_setValid. Wires directly to ifp.io.mispr and ifp.io.misprFetchID already present in ifetch.scala.
 
-Advancement 3 — VIPT Addressing + I-TLB
+Advancement 3 — VIPT Addressing + I-TLB 
 Add a new ITlb module and a new FSM state sTRANSLATE entered from sREAD before the tag check. The TLB is a fully-associative CAM with entries of { vpn, ppn, asid, valid }. On TLB hit, translate VA→PA in one cycle and proceed. On TLB miss, 
 enter sTLB_MISS, issue PageWalk_Req (already in your IO), wait for PageWalk_Res, 
 install the entry, and return to sTRANSLATE. Use VA bits for the cache index (no translation needed) and PA bits for tag only. Safe constraint: LINE_WIDTH + OFFSET_WIDTH <= 12 for 4KB pages — with LINES=1024 you'd need to reduce sets or switch to PIPT.
