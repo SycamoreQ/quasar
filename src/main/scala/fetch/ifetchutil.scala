@@ -6,25 +6,24 @@ import _root_.circt.stage.ChiselStage
 import branch_pred.{BranchPredictionTable, SqN}
 import branch_pred.BranchType
 
-case class iFetchParams (
-                          numUops: Int = 3,
-                          numBlocks: Int = 8,
-                          numBPUpd: Int = 2,
-                          numBranchPorts: Int = 2,
-                          decWidth: Int = 4,
-                          resetDelay: Int = 16,
-                          wfiDelay: Int = 4,
-                          IDX_LEN:Int,
-                          NUM_RQ    : Int     = 1,
-                          SIZE      : Int     = 8,
-                          ASSOC     : Int     = 4,
-                          IS_IFETCH : Boolean = false,
-                          dramBase  : Long = 0x00000000L,
-                          dramSize  : Long = 0x00010000L,
-                          mmioBase  : Long = 0x10000000L,
-                          mmioSize  : Long = 0x00001000L
-                        )
-
+case class iFetchParams(
+                         numUops      : Int = 3,
+                         numBlocks    : Int = 8,
+                         decWidth     : Int = 4,
+                         numBPUpd     : Int = 1,
+                         numBranchPorts: Int = 2,
+                         FSIZE_E      : Int = 4,    // fetch size exponent — 2^4 = 16 byte fetch lines
+                         VIRT_IDX_LEN : Int = 10,   // virtual index bits for VIPT cache
+                         CLSIZE_E     : Int = 6,    // cache line size exponent — 2^6 = 64 bytes
+                         CACHE_SIZE_E : Int = 14,   // total ICache size exponent — 2^14 = 16KB
+                         CASSOC       : Int = 4,    // ICache associativity
+                         ITLB_SIZE    : Int = 16,   // number of ITLB entries
+                         ITLB_ASSOC   : Int = 4,    // ITLB associativity
+                         dramBase     : Long = 0x00000000L,
+                         dramSize     : Long = 0x00010000L,
+                         mmioBase     : Long = 0x10000000L,
+                         mmioSize     : Long = 0x00001000L
+                       )
 
 class FetchID extends Bundle {
   val value = UInt(8.W);
@@ -67,8 +66,8 @@ class Branch extends Bundle {
 class RecoveryInfo {
   val fetchid = new FetchID
   val valid = Bool()
-  val retAct = RetAct
-  val histAct = HistAct
+  val retAct = RetAct()
+  val histAct = HistAct()
   val fetchOffs = new FetchOff
   val tgtSpec = BranchTgtSpec()
 }
@@ -78,23 +77,24 @@ class BranchProv extends Bundle {
   val fetchid = new FetchID();
   val dst = UInt(8.W);
   val flush = Bool();
-  val sqN = new SqN
+  val sqN = new SqN()
   val dstPC = UInt(32.W);
   val histAct = HistAct();
   val retAct =  RetAct();
   val fetchoffs = new FetchOff();
-  val tgtspec = new BranchTgtSpec();
+  val tgtspec = BranchTgtSpec();
 }
 
 class FetchBranchProv extends Bundle {
   val taken = Bool();
-  val dst = UInt(8.W);
+  val target = UInt(8.W);
   val dstpc = UInt()
   val fetchid = new FetchID();
   val histAct = HistAct();
   val retAct = RetAct();
   val fetchoffs = new FetchOff();
-  val tgtspec = new BranchTgtSpec();
+  val tgtspec = BranchTgtSpec();
+  val isFetchBranch = Bool()
   val wfi = Bool();
 }
 
@@ -108,7 +108,7 @@ class DecoderBranch extends Bundle {
 
 class BTUpdate extends Bundle {
   val valid = Bool()
-  val btype = BranchType
+  val btype = BranchType()
   val pc = UInt(32.W)
   val source = UInt(32.W)
   val target = UInt(32.W)
@@ -124,6 +124,7 @@ class BTUpdate extends Bundle {
 }
 
 class BPUpdate extends Bundle {
+  val fetchoff = new FetchOff
   val target = UInt(32.W)
   val valid = Bool()
   val fetchID = new FetchID
@@ -238,5 +239,5 @@ class IFetchOp extends Bundle  {
    val rIdx = new RetStackIdx( )
    val lastValid  = new FetchOff()
    val predRetAddr = UInt(32.W)
-   val fetchFault = new IFetchFault()
+   val fetchFault = IFetchFault()
 }

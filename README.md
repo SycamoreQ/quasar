@@ -9,6 +9,9 @@ TODO:
 
 - A more farther goal is to integrate AXI system bus inspired and used in the Coral NPU
 
+CURRENT: Writing testbenches in Verilator for the branch prediction and fetching mechanism. 
+This is to validate their working before I work on the advancements of the ICache.
+
 Advancement 1 — Set Associativity (2-way or 4-way) with tree-PLRU  --- DONE (possible issues exist)
 Touch IDirectCache. Duplicate tagMem, validMem, dataMem into a Vec(NUM_WAYS, ...). Hit becomes an OR across all ways. 
 Add a plruBits RegInit array — 1 bit per set for 2-way, 3 bits per set for 4-way. On hit, update the PLRU tree toward the hit way. On miss, evict the way pointed to by the PLRU root. In ICacheController,

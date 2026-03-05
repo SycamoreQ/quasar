@@ -2,7 +2,7 @@ package branch_pred
 
 import chisel3._
 import chisel3.util._
-import fetch.{BTUpdate, Branch, BranchProv, BranchTgtSpec, FetchID, FetchOff, HistAct, IFetchOp, RetAct, RetStackIdx}
+import fetch.{BTUpdate, Branch, BranchProv, BranchTgtSpec, FetchBranchProv, FetchID, FetchOff, HistAct, IFetchOp, RetAct, RetStackIdx}
 
 
 /*
@@ -228,6 +228,8 @@ class BranchHandler(NUM_INST: Int = 8) extends Module {
     }
   }
 
+
+
   val decBranch_c = Wire(new FetchBranchProv)
   val btUpdate_c = Wire(new BTUpdate)
   val retUpd_c = Wire(new ReturnDecUpdate)
@@ -290,13 +292,13 @@ class BranchHandler(NUM_INST: Int = 8) extends Module {
           btUpdate_c.source := Cat(io.op.pc(31, offsetWidth), io.op.predBr.offs.value)
 
           decBranch_c.taken := true.B
-          decBranch_c.fetchID := io.op.fetchid
+          decBranch_c.fetchid := io.op.fetchid
           decBranch_c := false.B
-          decBranch_c.fetchOffs.value := 1.U
+          decBranch_c.fetchoffs.value := 1.U
           decBranch_c.retAct := RetAct.RET_NONE
           decBranch_c.histAct := Mux(curBr.valid && curBr.btype === BH_BranchType.BRANCH,
             HistAct.HIST_APPEND_1, HistAct.HIST_NONE)
-          decBranch_c.tgtSpec := BranchTgtSpec.BR_TGT_MANUAL
+          decBranch_c.tgtspec := BranchTgtSpec.BR_TGT_MANUAL
           decBranch_c.wfi := false.B
 
           /// if valid prediction , updates the Return Address Stack (RAS) of the address and nextPC
@@ -317,21 +319,21 @@ class BranchHandler(NUM_INST: Int = 8) extends Module {
           when(!predIllegal && curBr.valid && (!indirBranch || curBr.btype === BH_BranchType.RETURN)) {
             btUpdate_c.clean := false.B
             btUpdate_c.btype := curBr_btypeSimple
-            btUpdate_c.src := curBr.fhPC
+            btUpdate_c.source := curBr.fhPC
             btUpdate_c.fetchStartOffs := io.op.pc(offsetWidth, 1).asTypeOf(new FetchOff)
-            btUpdate_c.dst := curBr.target
-            btUpdate_c.compressed := curBr.compr
+            btUpdate_c.target := curBr.target
+            btUpdate_c.compr := curBr.compr
 
-            decBranch_c.dst := Mux(curBr.btype === BH_BranchType.RETURN,
+            decBranch_c.target := Mux(curBr.btype === BH_BranchType.RETURN,
               io.op.predRetAddr, curBr.target(31, 1))
           }.elsewhen(predIllegal) {
-            decBranch_c.dst := curBr.pc
+            decBranch_c.target := curBr.pc
             newPredTaken_c := false.B
             newPredPos_c.value := Fill(offsetWidth, 1.U)
             endOffsValid := true.B
             endOffs := io.op.predBr.offs
           }.otherwise {
-            decBranch_c.dst := nextPC
+            decBranch_c.target := nextPC
             newPredTaken_c := false.B
             newPredPos_c.value := Fill(offsetWidth, 1.U)
 
@@ -351,12 +353,12 @@ class BranchHandler(NUM_INST: Int = 8) extends Module {
                 curBr.btype === BH_BranchType.RETURN ||
                 dirOnlyTaken) {
             decBranch_c.taken := true.B
-            decBranch_c.fetchID := io.op.fetchid
-            decBranch_c.fetchOffs.value := i.U
+            decBranch_c.fetchid := io.op.fetchid
+            decBranch_c.fetchoffs.value := i.U
             decBranch_c.target := Mux(curBr.btype === BH_BranchType.RETURN,
               io.op.predRetAddr, curBr.target(31, 1))
             decBranch_c.histAct := Mux(dirOnlyTaken, HistAct.HIST_APPEND_1, HistAct.HIST_NONE)
-            decBranch_c.tgtSpec := BranchTgtSpec.BR_TGT_MANUAL
+            decBranch_c.tgtspec := BranchTgtSpec.BR_TGT_MANUAL
             decBranch_c.wfi := false.B
 
             when (curBr.btype === BH_BranchType.CALL || curBr.btype === BH_BranchType.ICALL){
@@ -366,12 +368,12 @@ class BranchHandler(NUM_INST: Int = 8) extends Module {
             }.elsewhen(predicted) {
               val predIllegal = is32bit(io.op.predBr.offs.value + 1.U)
               decBranch_c.taken := true.B
-              decBranch_c.fetchID := io.op.fetchid
-              decBranch_c.fetchOffs.value := i.U
-              decBranch_c.dst := nextPC
+              decBranch_c.fetchid := io.op.fetchid
+              decBranch_c.fetchoffs.value := i.U
+              decBranch_c.target := nextPC
               decBranch_c.retAct := RetAct.RET_NONE
               decBranch_c.histAct := HistAct.HIST_NONE
-              decBranch_c.tgtSpec := BranchTgtSpec.BR_TGT_MANUAL
+              decBranch_c.tgtspec := BranchTgtSpec.BR_TGT_MANUAL
               decBranch_c.wfi := false.B
 
               /* predictor was tracking a branch but the instruction at that slot turned out to be "Illegal" or not a branch

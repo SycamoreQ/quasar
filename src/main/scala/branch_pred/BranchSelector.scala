@@ -44,7 +44,7 @@ class BranchSelector(NUM_BRANCHES:Int = 4) {
   // Select oldest branch between compBranches[0] and compBranches[1]
   when(compBranches(0).taken &&
      (!compBranches(1).taken ||
-      $signed(compBranches(0).sqN.value.asSInt -
+      (compBranches(0).sqN.value.asSInt -
         compBranches(1).sqN.value.asSInt) < 0.S)) {
 
     branch_c := compBranches(0)

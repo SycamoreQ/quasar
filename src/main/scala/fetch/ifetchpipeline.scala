@@ -1,11 +1,8 @@
 package fetch
 
 /*
+On advancement 3 - VIPT Addressing + I-TLB
 
-Full pipeline that connects the branch preds and pipeline for fetching. Need to implement the TLB and
-add it into line 135 - DONE
-
-TODO: needs to be done . Implemented PMA.
 */
 
 import chisel3._
@@ -18,11 +15,11 @@ class IFetchPipeline(params: iFetchParams) extends Module {
   val NUM_INST      = 1 << (params.FSIZE_E - 1)
   val FIFO_SIZE     = 4
   val VIRT_IDX_LEN  = params.VIRT_IDX_LEN
-  val CLSIZE_E      = params.CLSIZE_E
-  val CACHE_SIZE_E  = params.CACHE_SIZE_E
-  val CASSOC        = params.CASSOC
-  val ITLB_SIZE     = params.SIZE
-  val ITLB_ASSOC    = params.ASSOC
+  val CLSIZE_E     = params.CLSIZE_E
+  val CACHE_SIZE_E = params.CACHE_SIZE_E
+  val CASSOC       = params.CASSOC
+  val ITLB_SIZE    = params.ITLB_SIZE
+  val ITLB_ASSOC   = params.ITLB_ASSOC
 
   val io = IO(new Bundle {
     val MEM_busy          = Input(Bool())
@@ -122,8 +119,8 @@ class IFetchPipeline(params: iFetchParams) extends Module {
   //  what the rest of the pipeline consumes.
   val tlb = Module(new TLB(
     NUM_RQ    = 1,
-    SIZE      = params.SIZE,
-    ASSOC     = params.ASSOC,
+    SIZE      = params.ITLB_SIZE,
+    ASSOC     = params.ITLB_ASSOC,
     IS_IFETCH = true
   ))
 
@@ -304,7 +301,7 @@ class IFetchPipeline(params: iFetchParams) extends Module {
     }
     when(BH_decBranch.taken) {
       rePredPredTarget := BH_decBranch.target
-      rePredPos    := BH_newPredPos
+      rePredPredPos := BH_newPredPos
       rePredPredTaken  := BH_newPredTaken
     }
   }
@@ -317,8 +314,8 @@ class IFetchPipeline(params: iFetchParams) extends Module {
   io.fetchBranch := BH_decBranch
   when(cacheMiss || tlbMiss) {
     io.fetchBranch.taken       := true.B
-    io.fetchBranch.fetchID     := fetch1.fetchid
-    io.fetchBranch.fetchOffs   := fetch1.pc(params.FSIZE_E - 1, 1).asTypeOf(new FetchOff)
+    io.fetchBranch.fetchid    := fetch1.fetchid
+    io.fetchBranch.fetchoffs  := fetch1.pc(params.FSIZE_E - 1, 1).asTypeOf(new FetchOff)
     io.fetchBranch.isFetchBranch := true.B
   }
 
@@ -419,7 +416,7 @@ class IFetchPipeline(params: iFetchParams) extends Module {
     fetch0         := 0.U.asTypeOf(new IFetchOp)
     fetch1         := 0.U.asTypeOf(new IFetchOp)
   }.elsewhen(BH_decBranch.taken) {
-    fetchID.value  := BH_decBranch.fetchID.value + 1.U
+    fetchID.value  := BH_decBranch.fetchid.value + 1.U
   }.otherwise {
     when(cacheMiss || tlbMiss) {
       fetchID      := fetch1.fetchid
@@ -459,7 +456,7 @@ class IFetchPipeline(params: iFetchParams) extends Module {
       flushAddrIter  := 0.U
     }
     is(sFlushActive) {
-      val addrWidth  = flushAddrIter.
+      val addrWidth  = flushAddrIter.getWidth
       val assocWidth = flushAssocIter.getWidth
       val combined   = Cat(flushAssocIter, flushAddrIter) + 1.U
       val flushDone  = combined(addrWidth + assocWidth)

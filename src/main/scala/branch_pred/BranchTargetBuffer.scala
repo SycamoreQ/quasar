@@ -36,9 +36,9 @@ class BranchTargetBuffer(btbEntries: Int, btbTagSize: Int) extends Module {
   when(fetched.entry.valid && tagMatch && offsValid) {
     io.branch.valid := true.B
     io.branch.multiple := fetched.multiple
-    io.branch.target := fetched.entry.dst
+    io.branch.target := fetched.entry.target
     io.branch.btype := fetched.entry.btype
-    io.branch. := fetched.entry.compr
+    io.branch := fetched.entry.compr
     io.branch.offs := fetched.entry.offs
     io.branch.taken := (fetched.entry.btype === BranchType.BT_CALL) ||
       (fetched.entry.btype === BranchType.BT_JUMP)
@@ -56,7 +56,7 @@ class BranchTargetBuffer(btbEntries: Int, btbTagSize: Int) extends Module {
   }.otherwise {
     when(io.btUpdate.valid) {
       val baseIdx = Cat(
-        io.btUpdate.(idxWidth + offsetWidth, offsetWidth + 1),
+        io.btUpdate.source(idxWidth + offsetWidth, offsetWidth + 1),
         io.btUpdate.fetchStartOffs.value
       )
       var idx = WireDefault(baseIdx)
@@ -77,7 +77,7 @@ class BranchTargetBuffer(btbEntries: Int, btbTagSize: Int) extends Module {
         newEntry.valid := true.B
         newEntry.compr := io.btUpdate.compr
         newEntry.btype := io.btUpdate.btype
-        newEntry.dst := io.btUpdate.target(31, 1)
+        newEntry.target := io.btUpdate.target(31, 1)
         newEntry.src := io.btUpdate.source(idxWidth + btbTagSize, idxWidth + 1)
         newEntry.offs.value := io.btUpdate.source(offsetWidth, 1)
 

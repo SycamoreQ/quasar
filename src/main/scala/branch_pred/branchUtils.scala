@@ -3,7 +3,16 @@ package branch_pred
 import chisel3._
 import chisel3.util._
 import _root_.circt.stage.ChiselStage
-import fetch.{FetchID, FetchOff, RetStackIdx}
+import fetch.{BranchTgtSpec, FetchID, FetchOff, HistAct, RetAct, RetStackIdx}
+
+case class branchParams (
+                          val TAGE_STAGES:Int   = 4,
+                          val BASE: Int          = 2,
+                          val TABLE_SIZE:Int     = 256,
+                          val BP_BASEP_ID_LEN:Int  = 8,
+                          val BHist_t_LEN: Int    = 16,
+                          val ENTRY_POINT:Int  = 0x00000000,
+                        )
 
 
 /// sequence number: tracks OOE with sequence numbers for each instr
@@ -15,20 +24,44 @@ class SqN extends Bundle {
   def <=(that: SqN): Bool = this.value <= that.value
 }
 
+class TAGEID extends Bundle {
+  val value = UInt(64.W)
+}
+
+class BHist extends Bundle {
+  val params = new branchParams()
+  val value = UInt(params.BHist_t_LEN.W)
+  def apply(i: Int): Bool = value(i)
+  def apply(i: UInt): Bool = value(i)
+}
+
 /// micro-instruction with limited fields
 class IS_UOp extends Bundle {
   val sqN = new SqN
   val valid = Bool()
 }
 
+class BPBackup extends Bundle {
+  val params = new branchParams()
+  val history         = UInt(params.BHist_t_LEN.W)
+  val rIdx            = new RetStackIdx
+  val isRegularBranch = Bool()
+  val predTaken       = Bool()
+  val predOffs        = new FetchOff
+  val pred            = Bool()
+  val tageID          = new TAGEID
+  val altPred         = Bool()
+}
+
 class BTBEntry(tagSize: Int) extends Bundle {
   val btype = BranchType()
   val compr = Bool()
   val valid = Bool()
-  val dst = UInt(31.W)
+  val target=  UInt(31.W)
   val src = UInt(tagSize.W)
   val offs = new FetchOff
 }
+
 
 class FetchedBundle(tagSize: Int) extends Bundle {
   val entry = new BTBEntry(tagSize)
@@ -59,6 +92,7 @@ class RetRecQEntry extends Bundle {
   val fetchID = new FetchID
 }
 
+
 class PostRecSave extends Bundle {
   val addr = UInt(31.W)
   val rIdx = new RetStackIdx
@@ -67,23 +101,6 @@ class PostRecSave extends Bundle {
   val valid = Bool()
 }
 
-class PredBranch extends Bundle {
-  val valid = Bool()
-  val taken = Bool()
-  val dst = UInt(31.W)
-  val offs = new FetchOff
-  val btype = BranchType()
-  val compr = Bool()
-  val multiple = Bool()
-  val dirOnly = Bool()
-}
-
-class FetchBranchProv extends Bundle {
-  val taken = Bool()
-  val fetchID = new FetchID
-  val fetchOffs = new FetchOff
-  val isFetchBranch = Bool()
-}
 
 class ReturnDecUpdate extends Bundle {
   val valid = Bool()
