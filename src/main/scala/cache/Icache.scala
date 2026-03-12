@@ -27,6 +27,14 @@ Verify the flush signal path from BranchSelector through iFetch into IFetchPipel
 Only then write the sALLOCATE comparison — at that point it really is just a register, a comparison, and a conditional reset of cntWords
 */
 
+class Icache_Req extends Bundle {
+  // TODO
+}
+
+class Icache_Res extends Bundle {
+
+}
+
 class IDirectCache(
   val BSIZE    : Int = 4,
   val LINES    : Int = 1024,

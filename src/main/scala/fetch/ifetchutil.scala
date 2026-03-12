@@ -195,22 +195,6 @@ class VirtMemState extends Bundle {
 }
 
 
-class MemController_Req extends Bundle {
-  val valid = Bool()
-  val addr = UInt(32.W)
-  val we = Bool()
-  val wdata = UInt(32.W)
-  val size = UInt(2.W)
-  val burst = Bool()
-}
-
-class MemController_Res extends Bundle {
-  val valid = Bool()
-  val rdata = UInt(32.W)
-  val fault = Bool()
-  val ready = Bool()
-  val data = UInt(32.W)
-}
 
 class BPBackup extends Bundle {
   val history = UInt(16.W)        // Global History Register (GHR)
