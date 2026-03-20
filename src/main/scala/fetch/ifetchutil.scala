@@ -184,6 +184,8 @@ class PD_Instr extends Bundle {
   val pc = UInt(32.W)
   val fetchID = new FetchID
   val compressed = Bool()
+  val predTaken = Bool()
+  val predTarget = UInt(32.W)
   val fault = IFetchFault()
 }
 

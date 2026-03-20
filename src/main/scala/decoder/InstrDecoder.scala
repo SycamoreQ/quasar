@@ -57,44 +57,173 @@ class InstrDecoder(params: iFetchParams) extends Module {
 
   uop.imm12 := instr(31, 20)
 
-  opcode match {
-    case OpcodeConst.OPC_LUI => {
-      uop.fu := FU_t.FU_INT
-      uop.rs1 := 0.U
-      uop.rs2 := 0.U
-      uop.immB := 1.U
-      uop.rd := rd
-      uop.opcode := INT_Op.INT_LUI
+  switch(opcode) {
+
+    is(OpcodeConst.OPC_LUI) {
+      uop.fu     := FU_t.FU_INT
+      uop.rs1    := 0.U
+      uop.rs2    := 0.U
+      uop.immB   := true.B
+      uop.rd     := rd
+      uop.opcode := INT_Op.INT_LUI.asUInt
       invalidEnc := false.B
     }
 
-    case OpcodeConst.OPC_AUIPC => {
-      uop.fu := FU_t.FU_BRANCH
-      uop.rs1 := 0.U
-      uop.rs2 := 0.U
-      uop.rd := rd
-      uop.opcode := BR_Op.BR_AUIPC
+    is(OpcodeConst.OPC_AUIPC) {
+      uop.fu     := FU_t.FU_BRANCH
+      uop.rs1    := 0.U
+      uop.rs2    := 0.U
+      uop.rd     := rd
+      uop.opcode := BR_Op.BR_AUIPC.asUInt
       invalidEnc := false.B
     }
 
-    case OpcodeConst.OPC_JAL => {
-      uop.fu := FU_t.FU_BRANCH
-      uop.rs1 := 0.U
-      uop.rs2 := 0.U
-      uop.immB := 1.U
-      uop.rd := rd
-      uop.opcode := BR_Op.BR_JAL
+    is(OpcodeConst.OPC_JAL) {
+      uop.fu     := FU_t.FU_BRANCH
+      uop.rs1    := 0.U
+      uop.rs2    := 0.U
+      uop.immB   := true.B
+      uop.rd     := rd
+      uop.opcode := BR_Op.BR_JAL.asUInt
       invalidEnc := false.B
-      // No need to execute jumps that don't write to a register
-      if (uop.rd == 0) uop.fu := FU_t.FU_RN;
+      // Jumps that discard their result need no execution — eliminate at rename
+      when(rd === 0.U) {
+        uop.fu := FU_t.FU_RN
+      }
     }
 
-    case OpcodeConst.OPC_JALR => {
-      uop.fu := FU_t.FU_BRANCH
-      uop.rs1 := rs1
-      uop.immB := 1.U
-      uop.imm12 := instr(31 , 20)
-      uop.rd := rd
+    is(OpcodeConst.OPC_JALR) {
+      uop.fu    := FU_t.FU_BRANCH
+      uop.rs1   := rs1
+      uop.rs2   := 0.U
+      uop.immB  := true.B
+      uop.rd    := rd
+      uop.imm12 := instr(31, 20)
+      invalidEnc := false.B
+
+      // Opcode selection based on rd and rs1
+      // cond0: destination is a link register (ra=x1 or x5)
+      // cond1: source is a link register
+      // cond2: source and destination are the same register
+      val cond0 = rd  === 1.U || rd  === 5.U
+      val cond1 = rs1 === 1.U || rs1 === 5.U
+      val cond2 = rd  === rs1
+
+      when(!cond0 && !cond1) {
+        // neither is a link reg — plain jump, no return prediction
+        uop.opcode := BR_Op.BR_V_JR.asUInt
+      }.elsewhen(!cond0 && cond1) {
+        // source is link reg, dest is not — return
+        uop.opcode := BR_Op.BR_V_RET.asUInt
+      }.elsewhen(cond0 && !cond1) {
+        // dest is link reg, source is not — call
+        uop.opcode := BR_Op.BR_V_JALR.asUInt
+      }.elsewhen(cond0 && cond1 && !cond2) {
+        // both are link regs but different — return then call, treat as jump
+        uop.opcode := BR_Op.BR_V_JR.asUInt
+      }.otherwise {
+        // both are link regs and same register — call
+        uop.opcode := BR_Op.BR_V_JALR.asUInt
+      }
+
+      // imm carries the speculated target for the ALU to verify
+      // If the branch predictor already predicted taken use its target
+      // Otherwise use PC + 2 (compressed) or PC + 4 (regular)
+      when(io.in.predTaken) {
+        uop.imm := Cat(io.in.predTarget, 0.U(1.W))
+      }.otherwise {
+        uop.imm := Cat(io.in.pc + Mux(io.in.compressed, 1.U, 2.U), 0.U(1.W))
+      }
+    }
+
+    is(OpcodeConst.OPC_LOAD) {
+      uop.fu   := FU_t.FU_AGU
+      uop.rs1  := rs1
+      uop.rs2  := 0.U
+      uop.immB := true.B
+      uop.rd   := rd
+      // funct3 selects load width and signedness
+      switch(funct3) {
+        is(0.U) { uop.opcode := LSU_Op.LSU_LB.asUInt;  invalidEnc := false.B }
+        is(1.U) { uop.opcode := LSU_Op.LSU_LH.asUInt;  invalidEnc := false.B }
+        is(2.U) { uop.opcode := LSU_Op.LSU_LW.asUInt;  invalidEnc := false.B }
+        is(4.U) { uop.opcode := LSU_Op.LSU_LBU.asUInt; invalidEnc := false.B }
+        is(5.U) { uop.opcode := LSU_Op.LSU_LHU.asUInt; invalidEnc := false.B }
+        // funct3 values 3, 6, 7 are reserved — invalidEnc stays true
+      }
+    }
+
+    is(OpcodeConst.OPC_STORE) {
+      uop.fu   := FU_t.FU_AGU
+      uop.rs1  := rs1
+      uop.rs2  := rs2
+      uop.immB := true.B
+      uop.rd   := 0.U
+      switch(funct3) {
+        is(0.U) { uop.opcode := LSU_Op.LSU_SB.asUInt; invalidEnc := false.B }
+        is(1.U) { uop.opcode := LSU_Op.LSU_SH.asUInt; invalidEnc := false.B }
+        is(2.U) { uop.opcode := LSU_Op.LSU_SW.asUInt; invalidEnc := false.B }
+        // funct3 values 3-7 are reserved — invalidEnc stays true
+      }
+    }
+
+    is(OpcodeConst.OPC_BRANCH) {
+      uop.fu   := FU_t.FU_BRANCH
+      uop.rs1  := rs1
+      uop.rs2  := rs2
+      uop.immB := false.B
+      uop.rd   := 0.U
+      switch(funct3) {
+        is(0.U) { uop.opcode := BR_Op.BR_BEQ.asUInt;  invalidEnc := false.B }
+        is(1.U) { uop.opcode := BR_Op.BR_BNE.asUInt;  invalidEnc := false.B }
+        is(4.U) { uop.opcode := BR_Op.BR_BLT.asUInt;  invalidEnc := false.B }
+        is(5.U) { uop.opcode := BR_Op.BR_BGE.asUInt;  invalidEnc := false.B }
+        is(6.U) { uop.opcode := BR_Op.BR_BLTU.asUInt; invalidEnc := false.B }
+        is(7.U) { uop.opcode := BR_Op.BR_BGEU.asUInt; invalidEnc := false.B }
+        // funct3 values 2 and 3 are reserved — invalidEnc stays true
+      }
+    }
+
+    is(OpcodeConst.OPC_REG_IMM) {
+      uop.fu   := FU_t.FU_INT
+      uop.rs1  := rs1
+      uop.rs2  := 0.U
+      uop.rd   := rd
+      uop.immB := true.B
+
+      switch(funct3) {
+        is(0.U) { uop.opcode := INT_Op.INT_ADD.asUInt;  invalidEnc := false.B }
+        is(1.U) {
+          // SLLI — only valid when funct7 == 0
+          when(funct7 === 0.U) {
+            uop.opcode := INT_Op.INT_SLL.asUInt
+            invalidEnc := false.B
+          }
+        }
+        is(2.U) { uop.opcode := INT_Op.INT_SLT.asUInt;  invalidEnc := false.B }
+        is(3.U) { uop.opcode := INT_Op.INT_SLTU.asUInt; invalidEnc := false.B }
+        is(4.U) { uop.opcode := INT_Op.INT_XOR.asUInt;  invalidEnc := false.B }
+        is(5.U) {
+          // SRLI when funct7==0, SRAI when funct7==0x20, else illegal
+          when(funct7 === 0.U) {
+            uop.opcode := INT_Op.INT_SRL.asUInt
+            invalidEnc := false.B
+          }.elsewhen(funct7 === 0x20.U) {
+            uop.opcode := INT_Op.INT_SRA.asUInt
+            invalidEnc := false.B
+          }
+        }
+        is(6.U) { uop.opcode := INT_Op.INT_OR.asUInt;   invalidEnc := false.B }
+        is(7.U) { uop.opcode := INT_Op.INT_AND.asUInt;  invalidEnc := false.B }
+      }
+
+      // li rd, imm elimination — addi rd, x0, small_imm needs no execution
+      when(uop.opcode === INT_Op.INT_ADD.asUInt && rs1 === 0.U &&
+        uop.imm(11) === uop.imm(10) && uop.imm(11) === uop.imm(9) &&
+        uop.imm(11) === uop.imm(8)  && uop.imm(11) === uop.imm(7) &&
+        uop.imm(11) === uop.imm(6)  && uop.imm(11) === uop.imm(5)) {
+        uop.fu := FU_t.FU_RN
+      }
     }
   }
 }
