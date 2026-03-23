@@ -12,4 +12,3 @@ Whats Done-
 - AXI4 bundles, Transfer, MemCBundles - light mem model work 
 - DecodeTypes, InstrDecoder, Decoder basically the entire decoding step 
 
-Look into this paper for FlashAttn : https://www.together.ai/blog/flashattention-4
