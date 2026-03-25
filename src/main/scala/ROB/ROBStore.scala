@@ -193,20 +193,281 @@ class ROB(
       Cat(hiBits + 1.U, idx))
   }
 
-  val isRenamed = Wire(Bool())  // the instruction has been dispatched
-  val isExecuted = Wire(Bool()) //The execution unit has written back a result.
-  val noFlagsConflict = Wire(Bool())
-  val sqAllowCommit = Wire(Bool())
-  val timeOutCommit = Wire(Bool())
+  // Attempts to retire up to WIDTH instructions per cycle in order.
+  // Uses Scala vars as elaboration-time carry signals across loop iterations
+  // to enforce strict in-order commit — once one slot fails all subsequent
+  // slots in the same cycle are also blocked.
 
-  for (i <- 0 until WIDTH){
-    isRenamed := DontCare
-    isExecuted := deqFlags(i) =/= Flags.FLAGS_NX
-    noFlagsConflict := !io.IN_ldComLimit.valid || $signed(loadSqN_r - io.IN_ldComLimit.sqN.value) < 0
-    sqAllowCommit := !io.IN_ldComLimit.valid || $signed(loadSqN_r - io.IN_stComLimit(i).sqN.value) < 0
+  // Default output assignments — overridden when instructions retire
+  for (i <- 0 until WIDTH) {
+    io.OUT_comUOp(i).valid      := false.B
+    io.OUT_comUOp(i).rd         := 0.U
+    io.OUT_comUOp(i).tagDst     := TagConst.TAG_ZERO
+    io.OUT_comUOp(i).sqN        := 0.U.asTypeOf(new SqN)
+    io.OUT_comUOp(i).isBranch   := false.B
+    io.OUT_comUOp(i).compressed := false.B
+  }
+  io.OUT_trapUOp.valid    := false.B
+  io.OUT_bpUpdate.valid   := false.B
+  io.OUT_curFetchID       := 0.U.asTypeOf(new FetchID)
+  io.OUT_mispredFlush     := false.B
+  io.OUT_perfcInfo.validRetire  := 0.U
+  io.OUT_perfcInfo.branchRetire := 0.U
+  io.OUT_perfcInfo.stallCause   := StallCause.STALL_FRONTEND
+  io.OUT_perfcInfo.stallWeight  := 3.U
+
+  // Load/store SqN prefix sums across commit slots
+  // storeSqNs(i+1) and loadSqNs(i+1) give the SqN AFTER slot i commits
+  val storeSqNs = Wire(Vec(WIDTH + 1, UInt((ID_LEN + 1).W)))
+  val loadSqNs  = Wire(Vec(WIDTH + 1, UInt((ID_LEN + 1).W)))
+  storeSqNs(0) := storeSqN_r
+  loadSqNs(0)  := loadSqN_r
+  for (i <- 0 until WIDTH) {
+    storeSqNs(i + 1) := storeSqNs(i) + deqEntries(i).isSt.asUInt
+    loadSqNs(i + 1)  := loadSqNs(i)  + deqEntries(i).isLd.asUInt
   }
 
+  //carry state across loop iterations at elaboration time
+  // These become part of the generated hardware as chained conditions
+  var temp  = false.B   // once true, blocks all subsequent slots this cycle
+  var pred  = false.B   // true when a branch/ordering flag was seen earlier
+  var cnt   = 0.U(log2Ceil(WIDTH + 1).W)  // count of successful commits
+
+  for (i <- 0 until WIDTH) {
 
 
+    // Slot is occupied — within dispatched range
+    val isRenamed = (i.U.asSInt < (lastIndex - baseIndex).asSInt)
+
+    // Execution unit has written back a result
+    val isExecuted = deqFlags(i) =/= Flags.FLAGS_NX
+
+    // No earlier slot in this group had a serializing flag
+    val noFlagConflict = !pred || (deqFlags(i) === Flags.FLAGS_NONE)
+
+    // Load buffer allows this load to commit
+    val lbAllowsCommit = !io.IN_ldComLimit.valid ||
+      (loadSqNs(i).asSInt - io.IN_ldComLimit.sqN.value.asSInt) < 0.S
+
+    // All store queues allow this store to commit
+    val sqAllowsCommit = (0 until NUM_AGUS).map { j =>
+      !io.IN_stComLimit(j).valid ||
+        (storeSqNs(i + 1).asSInt - io.IN_stComLimit(j).sqN.value.asSInt) < 0.S
+    }.reduce(_ && _)
+
+    // Hang detection forces commit of head instruction after timeout
+    val timeoutCommit = (i == 0).B && hangDetected
+
+    when(!temp && isRenamed &&
+      ((isExecuted && noFlagConflict && sqAllowsCommit && lbAllowsCommit) ||
+        timeoutCommit)) {
+
+      // Reconstruct full SqN from partial index
+      val sqN = getSqN(deqAddrs(i))
+
+      io.OUT_comUOp(i).valid      := true.B
+      io.OUT_comUOp(i).rd         := deqEntries(i).rd
+      io.OUT_comUOp(i).tagDst     := deqEntries(i).tag
+      io.OUT_comUOp(i).sqN        := sqN.asTypeOf(new SqN)
+      io.OUT_comUOp(i).isBranch   := deqFlags(i) === Flags.FLAGS_PRED_TAKEN  ||
+        deqFlags(i) === Flags.FLAGS_PRED_NTAKEN ||
+        deqFlags(i) === Flags.FLAGS_BRANCH
+      io.OUT_comUOp(i).compressed := deqEntries(i).compressed
+
+      // Update current fetch ID visible to the trap handler
+      io.OUT_curFetchID := deqEntries(i).fetchID
+
+      when(deqFlags(i) === Flags.FLAGS_PRED_TAKEN ||
+        deqFlags(i) === Flags.FLAGS_PRED_NTAKEN) {
+        io.OUT_bpUpdate.valid       := true.B
+        io.OUT_bpUpdate.branchTaken := deqFlags(i) === Flags.FLAGS_PRED_TAKEN
+        io.OUT_bpUpdate.fetchID     := deqEntries(i).fetchID
+        io.OUT_bpUpdate.fetchoff   := deqEntries(i).fetchOffs
+        pred = true.B  // block subsequent slots — branch resolves in-order
+      }
+
+      // isException: timeout or flags in the exception range
+      val isException = timeoutCommit ||
+        (deqFlags(i).asUInt >= Flags.FLAGS_ILLEGAL_INSTR.asUInt &&
+          deqFlags(i).asUInt <= Flags.FLAGS_ST_AF.asUInt)
+
+      // sendTrapUOp: any serializing flag including FENCE, XRET, TRAP
+      val sendTrapUOp = timeoutCommit ||
+        deqFlags(i).asUInt >= Flags.FLAGS_FENCE.asUInt
+
+      when(sendTrapUOp) {
+        io.OUT_trapUOp.valid      := true.B
+        io.OUT_trapUOp.timeout    := timeoutCommit
+        io.OUT_trapUOp.flags      := deqFlags(i)
+        io.OUT_trapUOp.tag        := deqEntries(i).tag
+        io.OUT_trapUOp.sqN        := sqN.asTypeOf(new SqN)
+        io.OUT_trapUOp.loadSqN    := loadSqNs(i).asTypeOf(new SqN)
+        io.OUT_trapUOp.storeSqN   := storeSqNs(i + 1).asTypeOf(new SqN)
+        io.OUT_trapUOp.rd         := deqEntries(i).rd
+        io.OUT_trapUOp.fetchOffs  := deqEntries(i).fetchOffs
+        io.OUT_trapUOp.fetchID    := deqEntries(i).fetchID
+        io.OUT_trapUOp.compressed := deqEntries(i).compressed
+
+        // On exception redirect result to x0 — prevents incorrect
+        // register file update while still allowing rename map rollback
+        when(isException) {
+          io.OUT_comUOp(i).rd     := 0.U
+          io.OUT_comUOp(i).tagDst := TagConst.TAG_ZERO
+        }
+
+        temp = true.B  // stop committing after a trap
+      }
+
+      when(!isException) {
+        when(deqEntries(i).isLd) {
+          io.OUT_lastLoadSqN  := loadSqNs(i + 1).asTypeOf(new SqN)
+          loadSqN_r           := loadSqNs(i + 1)
+        }
+        when(deqEntries(i).isSt) {
+          io.OUT_lastStoreSqN := storeSqNs(i + 1).asTypeOf(new SqN)
+          storeSqN_r          := storeSqNs(i + 1)
+        }
+      }
+
+      io.OUT_perfcInfo.validRetire  := io.OUT_perfcInfo.validRetire  | (1.U << i)
+      io.OUT_perfcInfo.branchRetire := io.OUT_perfcInfo.branchRetire |
+        (io.OUT_comUOp(i).isBranch.asUInt << i)
+      io.OUT_perfcInfo.stallCause   := StallCause.STALL_NONE
+      io.OUT_perfcInfo.stallWeight  := (WIDTH - i - 1).U
+
+      didCommit := true.B
+      cnt = cnt + 1.U
+
+    }.otherwise {
+
+      // Slot i could not commit — record why for perf counters
+      // Only record the first stalled slot
+      when(!temp) {
+        io.OUT_perfcInfo.stallWeight := (WIDTH - i).U
+
+        when(!isRenamed || temp) {
+          io.OUT_perfcInfo.stallCause := StallCause.STALL_FRONTEND
+        }.elsewhen(!isExecuted) {
+          when(deqEntries(i).isSt) {
+            io.OUT_perfcInfo.stallCause := StallCause.STALL_STORE
+          }.elsewhen(deqEntries(i).isLd) {
+            io.OUT_perfcInfo.stallCause := StallCause.STALL_LOAD
+          }.otherwise {
+            io.OUT_perfcInfo.stallCause := StallCause.STALL_BACKEND
+          }
+        }.elsewhen(!sqAllowsCommit) {
+          io.OUT_perfcInfo.stallCause := StallCause.STALL_STORE
+        }.elsewhen(!lbAllowsCommit) {
+          io.OUT_perfcInfo.stallCause := StallCause.STALL_LOAD
+        }.elsewhen(!noFlagConflict) {
+          io.OUT_perfcInfo.stallCause := StallCause.STALL_ROB
+        }
+
+        // Drive trap UOp with NX flags for debugger visibility on slot 0
+        when(i.U === 0.U && isRenamed) {
+          io.OUT_trapUOp.valid      := true.B
+          io.OUT_trapUOp.timeout    := false.B
+          io.OUT_trapUOp.flags      := Flags.FLAGS_NX
+          io.OUT_trapUOp.fetchOffs  := deqEntries(i).fetchOffs
+          io.OUT_trapUOp.fetchID    := deqEntries(i).fetchID
+          io.OUT_trapUOp.compressed := deqEntries(i).compressed
+        }
+      }
+
+      temp = true.B  // block all subsequent slots
+    }
+  }
+
+  // Advance commit head by number of successful commits this cycle
+  baseIndex := baseIndex + cnt
+
+  // mispr replay logic
+
+  val misprReplay_R = RegInit(new MisprReplay  , (baseIndex -1.U , 0))
+  val misprReplay_c = Wire(new MisprReplay)
+
+
+
+  //When a branch misprediction is detected the execute unit knows exactly which instruction caused the misprediction
+  // it tags the result with that instruction's SqN and sends it back via IN_branch.
+  // iterSqN iterates over the sequence of instructions to be replayed until endSqN is the SqN of the instr you want to stop
+  //replaying.
+  val misprReplay_c = WireDefault(misprReplay_r)
+
+  when(io.IN_branch.taken) {
+    misprReplay_c.valid   := true.B
+    misprReplay_c.endSqN  := io.IN_branch.sqN.value
+    misprReplay_c.iterSqN := baseIndex
+  }
+
+  val misprReplayEnd = misprReplay_c.valid &&
+    (misprReplay_c.iterSqN.value + WIDTH.U - 1.U >= misprReplay_c.endSqN .value||
+      (misprReplay_c.iterSqN.value + WIDTH.U - 1.U).asSInt -
+        misprReplay_c.endSqN.value.asSInt === 0.S)
+
+  // Sequential update
+  misprReplay_r := misprReplay_c
+  when(misprReplay_c.valid) {
+    when(misprReplayEnd) {
+      misprReplay_r.valid := false.B
+    }.otherwise {
+      misprReplay_r.iterSqN := misprReplay_c.iterSqN.value + WIDTH.U
+    }
+  }
+
+  val misprReplayFwdMask = Wire(Vec(WIDTH , Bool()))
+
+  for (i <- 0 until WIDTH) {
+    val curSqN = misprReplay_c.iterSqN.value + i.U
+    misprReplayFwdMask(i) := (curSqN.asSInt - misprReplay_c.endSqN.value.asSInt) <= 0.S
+
+  }
+
+  misprReplayEnd := !misprReplayFwdMask(WIDTH - 1) ||
+    (misprReplay_c.iterSqN.value + (WIDTH - 1).U) === misprReplay_c.endSqN.value
+  io.OUT_mispredFlush := RegNext(misprReplay_c.valid && misprReplayFwdMask.asUInt.orR)
+
+  when(misprReplay_c.valid) {
+    for (i <- 0 until WIDTH) {
+      when(misprReplayFwdMask(i)) {
+        // Read entry at iterSqN + i
+        val replayAddr = misprReplay_c.iterSqN.value + i.U
+        val replayBank = replayAddr(log2Ceil(WIDTH)-1, 0)
+        val replayIdx  = replayAddr(ID_LEN-1, log2Ceil(WIDTH))
+
+        // Drive commit port for rename table rollback
+        // rd comes from entry, tag comes from entry
+        // On trap entries rd is redirected to 0
+        io.OUT_comUOp(i).valid  := true.B
+        io.OUT_comUOp(i).rd     := MuxLookup(replayBank, 0.U.asTypeOf(new ROBEntry))(
+          (0 until WIDTH).map(b =>
+            b.U -> entries(b)(replayIdx))
+        ).rd
+        io.OUT_comUOp(i).tagDst := MuxLookup(replayBank, 0.U.asTypeOf(new ROBEntry))(
+          (0 until WIDTH).map(b =>
+            b.U -> entries(b)(replayIdx))
+        ).tag
+      }
+    }
+  }
+
+  //Hang Detection
+  // Counts cycles without a commit. On overflow forces a timeout commit
+  // via timeoutCommit in Step 6 which trips didCommit and resets the counter.
+
+  when(reset.asBool) {
+    hangCounter  := 0.U
+    hangDetected := false.B
+  }.elsewhen(didCommit) {
+    // Something committed this cycle — pipeline is not hung, reset counter
+    hangCounter  := 0.U
+    hangDetected := false.B
+  }.elsewhen(!hangDetected) {
+    // No commit and not yet detected — increment counter
+    // +& preserves the carry bit to detect overflow
+    val hangInc  = hangCounter +& 1.U
+    hangDetected := hangInc(HangConst.HANG_COUNTER_LEN)
+    hangCounter  := hangInc(HangConst.HANG_COUNTER_LEN - 1, 0)
+  }
 
 }
