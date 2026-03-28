@@ -1,11 +1,8 @@
-package rob
+package ROB
 
 import chisel3._
 import chisel3.util._
 
-// ---------------------------------------------------------------------------
-// RenameTable
-//
 // Maintains two mappings from architectural registers (x0-x31) to physical
 // tags:
 //
@@ -23,7 +20,8 @@ import chisel3.util._
 //   NUM_REGS    — number of architectural registers (32 for RV32I)
 //   TAG_SIZE    — physical tag width in bits (8 for 128 physical registers)
 //                 MSB = 1 means special tag (x0 or immediate, always available)
-// ---------------------------------------------------------------------------
+
+
 class RenameTable(
   NUM_LOOKUP  : Int = 8,    // 2 * DEC_WIDTH
   NUM_ISSUE   : Int = 4,    // DEC_WIDTH
@@ -63,7 +61,6 @@ class RenameTable(
     val IN_wbTag   = Input(Vec(NUM_WB, UInt(TAG_SIZE.W)))
   })
 
-  // ---- Storage ----------------------------------------------------------
 
   // Committed map — updated only at ROB commit, ground truth
   val comTag  = RegInit(VecInit(Seq.fill(NUM_REGS)(TagConst.TAG_ZERO)))
@@ -76,8 +73,6 @@ class RenameTable(
   // MSB of tag is the special flag — special tags are always available
   val tagAvail = RegInit(~0.U(NUM_TAGS.W))
 
-  // ---- Combinational Lookup --------------------------------------------
-  //
   // For each lookup port:
   //   1. Return current specTag and check tagAvail
   //   2. Forward from same-cycle writebacks
@@ -161,7 +156,6 @@ class RenameTable(
       }
     }
 
-    // ---- Commit — update committed map --------------------------------
     // Also update specTag when mispredFlush is active (ROB replay)
     for (i <- 0 until NUM_COMMIT) {
       when(io.IN_commitValid(i) && io.IN_commitIDs(i) =/= 0.U) {

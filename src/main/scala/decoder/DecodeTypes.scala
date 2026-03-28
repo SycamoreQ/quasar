@@ -159,7 +159,9 @@ class D_UOp extends Bundle {
   val immB       = Bool()         // true when imm field is valid
   val imm        = UInt(32.W)     // sign-extended immediate
   val imm12      = UInt(12.W)     // raw 12-bit immediate (JALR offset)
-  val compressed = Bool()         // was originally a 16-bit C instruction
+  val compressed = Bool() // was originally a 16-bit C instruction
+  val isLoad = Bool()
+  val isStore = Bool()
 }
 
 // DecodeBranch

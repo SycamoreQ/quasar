@@ -83,6 +83,8 @@ class BranchProv extends Bundle {
   val retAct =  RetAct();
   val fetchoffs = new FetchOff();
   val tgtspec = BranchTgtSpec();
+  val loadSqN = new SqN
+  val storeSqB = new SqN
 }
 
 class FetchBranchProv extends Bundle {
