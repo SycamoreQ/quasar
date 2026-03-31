@@ -11,7 +11,8 @@ import branch_pred.SqN
 // TAG_SIZE = 7 bits → 64 physical registers + special values
 object TagConst {
   val TAG_SIZE = 7
-  val TAG_ZERO = "b1000000".U(7.W)   // x0 — always reads as zero, no writeback
+  val TAG_ZERO = "b1000000".U(7.W) // x0 — always reads as zero, no writeback
+  val TAG_SC_FAIL = "b10000001".U(8.W)
 }
 
 // Physical register file index — 6 bits, indexes into the actual register file
