@@ -108,6 +108,7 @@ class R_UOp(NUM_PORTS_TOTAL: Int = 4) extends Bundle {
   val valid    = Bool()
   val validIQ  = UInt(NUM_PORTS_TOTAL.W)     // per-IQ valid bits (held while IQ stalls)
 
+  val pc = UInt(32.W)
   // Sequence numbers
   val sqN      = new SqN
   val loadSqN  = new SqN                     // load sequence number assigned at rename
@@ -126,6 +127,7 @@ class R_UOp(NUM_PORTS_TOTAL: Int = 4) extends Bundle {
 
   // Architectural fields — passed through from D_UOp
   val rd       = UInt(5.W)
+
   val fu       = UInt(4.W)                   // FU_t as UInt to avoid cross-package enum issues
   val opcode   = UInt(7.W)
   val imm      = UInt(32.W)

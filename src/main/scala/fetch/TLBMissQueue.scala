@@ -70,16 +70,16 @@ class TLBMissQueue(SIZE: Int = 4) extends Module {
   }
   io.outReady := freeSlotValid
 
-  // ---- Count free slots (adder tree, works for SIZE <= 4) ----
+  //Count free slots (adder tree, works for SIZE <= 4)
   val stage0_0 = !queue(0).valid +& !queue(1).valid
   val stage0_1 = !queue(2).valid +& !queue(3).valid
   val freeCount = stage0_0 +& stage0_1
   // Subtract one if the current output is valid (it occupies a slot)
   io.free := Mux(io.uopOut.valid, freeCount - 1.U, freeCount)
 
-  // ---- Find the oldest entry to dequeue ----------------------
-  // When the page walker is idle (!pwActive) we also allow
-  // non-ready entries so they can start a new walk.
+  //Find the oldest entry to dequeue
+  //When the page walker is idle (!pwActive) we also allow
+  //non-ready entries so they can start a new walk.
   val deqSlotValid = Wire(Bool())
   val deqSlot      = Wire(UInt(ID_LEN.W))
   deqSlotValid := false.B
@@ -91,7 +91,6 @@ class TLBMissQueue(SIZE: Int = 4) extends Module {
     }
   }
 
-  // ---- Sequential logic --------------------------------------
   val uopOut_r = RegInit(0.U.asTypeOf(new AGU_UOp))
   io.uopOut := uopOut_r
 
@@ -104,7 +103,7 @@ class TLBMissQueue(SIZE: Int = 4) extends Module {
 
   }.otherwise {
 
-    // 1. Mark entries ready when the page walker covers their address
+    // Mark entries ready when the page walker covers their address
     when(io.pw.valid) {
       for (i <- 0 until SIZE) {
         when(queue(i).valid && !ready(i)) {
@@ -119,7 +118,7 @@ class TLBMissQueue(SIZE: Int = 4) extends Module {
       }
     }
 
-    // 2. Flush entries that are younger than a mispredicted branch
+    //Flush entries that are younger than a mispredicted branch
     when(io.branch.taken) {
       for (i <- 0 until SIZE) {
         when(queue(i).valid &&
@@ -130,7 +129,7 @@ class TLBMissQueue(SIZE: Int = 4) extends Module {
       }
     }
 
-    // 3. Enqueue — only accept if the uop is not being flushed
+    //Enqueue — only accept if the uop is not being flushed
     when(io.enqueue && io.uopIn.valid &&
       (!io.branch.taken ||
         (io.uopIn.sqN.value.asSInt - io.branch.sqN.value.asSInt) <= 0.S)) {
@@ -139,15 +138,15 @@ class TLBMissQueue(SIZE: Int = 4) extends Module {
       ready(freeSlot) := !io.vmem.enabled || io.uopReady
     }
 
-    // 4. Dequeue output register
-    //    Clear if dequeue requested, or if branch flushes current output
+    //Dequeue output register
+    //Clear if dequeue requested, or if branch flushes current output
     when(io.dequeue ||
       (io.branch.taken &&
         (uopOut_r.sqN.value.asSInt - io.branch.sqN.value.asSInt) > 0.S)) {
       uopOut_r.valid := false.B
     }
 
-    // 5. Advance output register from queue when slot is free
+    //Advance output register from queue when slot is free
     when((!uopOut_r.valid || io.dequeue) && deqSlotValid) {
       val candidate = queue(deqSlot)
       when(candidate.valid &&

@@ -11,7 +11,7 @@ import decoder.{FU_t, INT_Op, LSU_Op}
 The ROB is purely a tracking and commit structure
  */
 
-class ROB(
+class ROBStore(
            ID_LEN      : Int = 5,
            WIDTH       : Int = 4,       // commit width = DEC_WIDTH
            WIDTH_RN    : Int = 4,       // rename/dispatch width

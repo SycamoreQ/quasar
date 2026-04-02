@@ -162,6 +162,7 @@ class D_UOp extends Bundle {
   val compressed = Bool() // was originally a 16-bit C instruction
   val isLoad = Bool()
   val isStore = Bool()
+  val pc = UInt(32.W)
 }
 
 // DecodeBranch

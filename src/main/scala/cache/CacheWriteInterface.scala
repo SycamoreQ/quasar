@@ -5,7 +5,7 @@ import chisel3.util._
 
 
 // CacheWriteInterface
-//
+
 // Sits between incoming AXI burst data and the cache SRAM.
 // Handles three cases based on IWIDTH vs CWIDTH:
 //
@@ -14,7 +14,6 @@ import chisel3.util._
 //                      idx counter walks through sub-words
 //   IWIDTH <  CWIDTH : multiple beats must be accumulated before one SRAM
 //                      word can be written, wm tracks which chunks arrived
-//
 
 class CacheWriteInterface(
   ADDR_BITS : Int = 12,  //cache SRAM address width (CACHE_SIZE_E - 2)

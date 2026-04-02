@@ -12,7 +12,6 @@ import chisel3.util._
 //
 // On misprediction the buffer is restored to its committed state by replaying
 // the commit sequence — freed tags re-enter the list as the ROB replays.
-//
 // Parameters:
 //   NUM_ISSUE   — tags allocated per cycle (DEC_WIDTH)
 //   NUM_COMMIT  — tags freed per cycle (DEC_WIDTH)

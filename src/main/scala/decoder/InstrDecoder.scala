@@ -32,7 +32,7 @@ class InstrDecoder(params: iFetchParams) extends Module {
   val rs1 = instr(19, 15)
   val rs2 = instr(24, 20)
   val rd = instr(11, 7)
-
+  uop.pc       := io.in.pc
   uop.valid := io.in.valid && !io.inBranch.taken
   uop.fetchID := io.in.fetchID
   uop.fetchOffs := io.in.fetchID
