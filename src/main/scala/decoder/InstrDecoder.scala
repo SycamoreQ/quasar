@@ -18,8 +18,6 @@ class InstrDecoder(params: iFetchParams) extends Module {
 
   val decBranch = WireDefault(0.U.asTypeOf(new DecodeBranch))
   val invalidEnc = WireDefault(true.B)
-  val instr32 = RegInit(0.U(32.W))
-  val instr16 = RegInit(0.U(32.W))
   val uop = WireDefault(0.U.asTypeOf(new D_UOp))
 
   val instr = io.in.bits // full 32-bit instruction word
@@ -35,7 +33,7 @@ class InstrDecoder(params: iFetchParams) extends Module {
   uop.pc       := io.in.pc
   uop.valid := io.in.valid && !io.inBranch.taken
   uop.fetchID := io.in.fetchID
-  uop.fetchOffs := io.in.fetchID
+  uop.fetchOffs := io.in.fetchoff
 
   val imm_i = Cat(Fill(20, instr(31)), instr(31, 20))
   val imm_s = Cat(Fill(20, instr(31)), instr(31, 25), instr(11, 7))
@@ -259,6 +257,187 @@ class InstrDecoder(params: iFetchParams) extends Module {
       uop.rd := rd
       uop.fu := FU_t.FU_INT
 
+      is(OpcodeConst.OPC_FENCE) {
+        switch(funct3) {
+          is(0.U) {
+            uop.fu     := FU_t.FU_RN
+            invalidEnc := false.B
+          }
+          is(1.U) {
+            // FENCE.I — serializing, must drain pipeline and flush ICache
+            uop.fu        := FU_t.FU_INT
+            uop.opcode    := INT_Op.INT_SYS.asUInt
+            invalidEnc    := false.B
+            decBranch.taken    := true.B
+            decBranch.wfi      := true.B
+            decBranch.fetchID  := uop.fetchID
+            decBranch.fetchOffs := uop.fetchOffs
+          }
+        }
+      }
+
+      def takeBranch() = {
+        decBranch.taken     := true.B
+        decBranch.wfi       := true.B
+        decBranch.fetchID   := uop.fetchID
+        decBranch.fetchOffs := uop.fetchOffs
+      }
+
+      is (OpcodeConst.OPC_ENV) {
+        switch(funct3) {
+          is(0.U) {
+            when(instr(31, 20) === 0.U && rs1 === 0.U && rd === 0.U) {
+              uop.fu := FU_t.FU_TRAP
+              uop.opcode := TRAP_Op.TRAP_ECALL_M.asUInt // transfers control to the OS or hypervisor
+              uop.immB := true.B
+              uop.rs1 := 0.U
+              uop.rs2 := 0.U
+              uop.rd := 0.U
+              decBranch.taken := true.B
+              decBranch.wfi := true.B
+              decBranch.fetchID := uop.fetchID
+              decBranch.fetchOffs := uop.fetchOffs
+              invalidEnc := false.B
+            }
+
+            when(instr(31, 20) === 1.U && rs1 === 0.U && rd === 0.U) {
+              uop.fu := FU_t.FU_TRAP
+              uop.opcode := TRAP_Op.TRAP_BREAK.asUInt // transfers control to a debugger
+              uop.rs1 := 0.U
+              uop.rs2 := 0.U
+              uop.rd := 0.U
+              decBranch.taken := true.B
+              decBranch.wfi := true.B
+              decBranch.fetchID := uop.fetchID
+              decBranch.fetchOffs := uop.fetchOffs
+              invalidEnc := false.B
+            }
+
+            when(funct7 === 0x18.U && rs2 === 2.U && rs1 === 0.U && rd === 0.U) {
+              uop.fu := FU_t.FU_CSR
+              //. Returns from a machine-mode trap handler back to the interrupted code.
+              // It restores pc from mepc and privilege level from mstatus
+              uop.opcode := CSR_Op.CSR_MRET.asUInt
+              decBranch.taken := true.B
+              decBranch.wfi := true.B
+              decBranch.fetchID := uop.fetchID
+              decBranch.fetchOffs := uop.fetchOffs
+              invalidEnc := false.B
+            }
+
+            // both of these do not take any input registers (rs1 and rs2) they only manipulate CSR
+
+            when(funct7 === 0x08.U && rs2 === 2.U && rs1 === 0.U && rd === 0.U) {
+              uop.fu := FU_t.FU_CSR
+              //Supervisor Return. Same concept as MRET but returns from supervisor-mode traps
+              uop.opcode := CSR_Op.CSR_SRET.asUInt
+              decBranch.taken := true.B
+              decBranch.wfi := true.B
+              decBranch.fetchID := uop.fetchID
+              decBranch.fetchOffs := uop.fetchOffs
+              invalidEnc := false.B
+            }
+
+            when(funct7 === 0x08.U && rs2 === 5.U && rs1 === 0.U && rd === 0.U) {
+              //Wait For Interrupt. Hints to the processor to stop executing and wait until an interrupt arrives
+              when(io.decState.allowWFI === true.B) {
+                uop.fu := FU_t.FU_RN
+                decBranch.taken := true.B
+                decBranch.wfi := true.B
+                decBranch.fetchID := uop.fetchID
+                decBranch.fetchOffs := uop.fetchOffs
+                invalidEnc := false.B
+              }
+            }
+
+            when(funct7 === 0x09.U && rd === 0.U) {
+              //Supervisor Fence Virtual Memory Address.
+              // Flushes TLB entries. Required after modifying page tables so the hardware TLB reflects the new mappings
+              uop.rs1 := rs1
+              uop.rs2 := rs2
+              uop.fu := FU_t.FU_TRAP
+
+              when(io.decState.allowSFENCE === true.B) {
+                uop.opcode := TRAP_Op.TRAP_V_SFENCE_VMA.asUInt
+              }.otherwise {
+                uop.opcode := TRAP_Op.TRAP_ILLEGAL_INSTR.asUInt
+              }
+              decBranch.taken := true.B
+              decBranch.wfi := true.B
+              decBranch.fetchID := uop.fetchID
+              decBranch.fetchOffs := uop.fetchOffs
+              invalidEnc := false.B
+            }
+          }
+
+          is(1.U) {
+            uop.fu := FU_t.FU_CSR; uop.opcode := CSR_Op.CSR_RW.asUInt; uop.rs1 := rs1; uop.rd := rd; uop.imm := instr(31, 20); invalidEnc := false.B
+          }
+          is(2.U) {
+            uop.fu := FU_t.FU_CSR
+            uop.rs1 := rs1
+            uop.rd := rd
+
+            when(rs1 === 0.U) {
+              uop.opcode := CSR_Op.CSR_R.asUInt
+            }.otherwise {
+              uop.opcode := CSR_Op.CSR_RS.asUInt
+            }
+
+            invalidEnc := false.B
+          }
+
+          is(3.U) {
+            uop.fu := FU_t.FU_CSR
+            uop.rs1 := rs1
+            uop.rd := rd
+
+            when(rs1 === 0.U) {
+              uop.opcode := CSR_Op.CSR_R.asUInt
+            }.otherwise {
+              uop.opcode := CSR_Op.CSR_RC.asUInt
+            }
+
+            invalidEnc := false.B
+          }
+
+          is(5.U) {
+            //atomically reads the current value of a CSR register into rd, then writes a new value into that CSR.
+            // uses the imm field to read/write and not a GPR
+            uop.fu := FU_t.FU_CSR
+            uop.rd := rd
+            uop.opcode := CSR_Op.CSR_RW_I.asUInt
+            uop.imm := Cat(instr(19, 15), instr(31, 20))
+            invalidEnc := false.B
+          }
+
+          is(6.U) {
+            uop.fu := FU_t.FU_CSR
+            uop.rd := rd
+
+            when(rs1 === 0.U) {
+              uop.opcode := CSR_Op.CSR_R.asUInt
+            }.otherwise {
+              uop.opcode := CSR_Op.CSR_RS_I.asUInt
+            }
+
+            invalidEnc := false.B
+          }
+
+          is(7.U) {
+            uop.fu := FU_t.FU_CSR
+            uop.rd := rd
+
+            when(rs1 === 0.U) {
+              uop.opcode := CSR_Op.CSR_R.asUInt
+            }.otherwise {
+              uop.opcode := CSR_Op.CSR_RC_I.asUInt
+            }
+            invalidEnc := false.B
+          }
+        }
+      }
+
       switch(funct7) {
         is(0.U) {
           switch(funct3) {
@@ -345,183 +524,7 @@ class InstrDecoder(params: iFetchParams) extends Module {
         }
       }
 
-    is(OpcodeConst.OPC_FENCE) {
-      switch(funct3) {
-        is(0.U) {
-          uop.fu     := FU_t.FU_RN
-          invalidEnc := false.B
-        }
-        is(1.U) {
-          // FENCE.I — serializing, must drain pipeline and flush ICache
-          uop.fu        := FU_t.FU_INT
-          uop.opcode    := INT_Op.INT_SYS.asUInt
-          invalidEnc    := false.B
-          decBranch.taken    := true.B
-          decBranch.wfi      := true.B
-          decBranch.fetchID  := uop.fetchID
-          decBranch.fetchOffs := uop.fetchOffs
-        }
-      }
-    }
 
-    def takeBranch() = {
-      decBranch.taken     := true.B
-      decBranch.wfi       := true.B
-      decBranch.fetchID   := uop.fetchID
-      decBranch.fetchOffs := uop.fetchOffs
-    }
-
-    is (OpcodeConst.OPC_ENV) {
-      switch (funct3) {
-        is (0.U) {
-          when (instr(31 , 20) === 0.U  && rs1 === 0.U && rd === 0.U) {
-            uop.fu := FU_t.FU_TRAP
-            uop.opcode := TRAP_Op.TRAP_ECALL_M.asUInt // transfers control to the OS or hypervisor
-            uop.immB := true.B
-            uop.rs1 := 0.U
-            uop.rs2 := 0.U
-            uop.rd := 0.U
-            decBranch.taken := true.B
-            decBranch.wfi := true.B
-            decBranch.fetchID := uop.fetchID
-            decBranch.fetchOffs := uop.fetchOffs
-            invalidEnc := false.B
-          }
-
-          when (instr(31 , 20) === 1.U && rs1 === 0.U && rd === 0.U) {
-            uop.fu := FU_t.FU_TRAP
-            uop.opcode := TRAP_Op.TRAP_BREAK.asUInt // transfers control to a debugger
-            uop.rs1 := 0.U
-            uop.rs2 := 0.U
-            uop.rd := 0.U
-            decBranch.taken := true.B
-            decBranch.wfi := true.B
-            decBranch.fetchID := uop.fetchID
-            decBranch.fetchOffs := uop.fetchOffs
-            invalidEnc := false.B
-          }
-
-          when (funct7 === 0x18.U  && rs2 === 2.U && rs1 === 0.U && rd === 0.U ){
-            uop.fu := FU_t.FU_CSR
-            //. Returns from a machine-mode trap handler back to the interrupted code.
-            // It restores pc from mepc and privilege level from mstatus
-            uop.opcode := CSR_Op.CSR_MRET.asUInt
-            decBranch.taken := true.B
-            decBranch.wfi := true.B
-            decBranch.fetchID := uop.fetchID
-            decBranch.fetchOffs := uop.fetchOffs
-            invalidEnc := false.B
-          }
-
-          // both of these do not take any input registers (rs1 and rs2) they only manipulate CSR
-
-          when (funct7 === 0x08.U && rs2 === 2.U && rs1 === 0.U && rd === 0.U){
-            uop.fu := FU_t.FU_CSR
-            //Supervisor Return. Same concept as MRET but returns from supervisor-mode traps
-            uop.opcode := CSR_Op.CSR_SRET.asUInt
-            decBranch.taken := true.B
-            decBranch.wfi := true.B
-            decBranch.fetchID := uop.fetchID
-            decBranch.fetchOffs := uop.fetchOffs
-            invalidEnc := false.B
-          }
-
-          when (funct7 === 0x08.U && rs2 === 5.U && rs1 === 0.U && rd === 0.U){
-            //Wait For Interrupt. Hints to the processor to stop executing and wait until an interrupt arrives
-            when (io.decState.allowWFI === true.B) {
-              uop.fu := FU_t.FU_RN
-              decBranch.taken := true.B
-              decBranch.wfi := true.B
-              decBranch.fetchID := uop.fetchID
-              decBranch.fetchOffs := uop.fetchOffs
-              invalidEnc := false.B
-            }
-          }
-
-          when (funct7 === 0x09.U && rd === 0.U) {
-            //Supervisor Fence Virtual Memory Address.
-            // Flushes TLB entries. Required after modifying page tables so the hardware TLB reflects the new mappings
-            uop.rs1 := rs1
-            uop.rs2 := rs2
-            uop.fu := FU_t.FU_TRAP
-
-            when (io.decState.allowSFENCE === true.B){
-              uop.opcode := TRAP_Op.TRAP_V_SFENCE_VMA.asUInt
-            }.otherwise{
-              uop.opcode := TRAP_Op.TRAP_ILLEGAL_INSTR
-            }
-            decBranch.taken := true.B
-            decBranch.wfi := true.B
-            decBranch.fetchID := uop.fetchID
-            decBranch.fetchOffs := uop.fetchOffs
-            invalidEnc := false.B
-          }
-        }
-
-        is (1.U) {uop.fu := FU_t.FU_CSR ; uop.opcode := CSR_Op.CSR_RW.asUInt ; uop.rs1 := rs1 ; uop.rd := rd ; uop.imm := instr(31 , 20) ; invalidEnc := false.B}
-        is (2.U) {
-          uop.fu := FU_t.FU_CSR
-          uop.rs1 := rs1
-          uop.rd := rd
-
-          when (rs1 === 0.U) {
-            uop.opcode := CSR_Op.CSR_R.asUInt
-          }.otherwise{
-            uop.opcode := CSR_Op.CSR_RS.asUInt
-          }
-
-          invalidEnc := false.B
-        }
-
-        is (3.U) {
-          uop.fu := FU_t.FU_CSR
-          uop.rs1 := rs1
-          uop.rd := rd
-
-          when (rs1 === 0.U) {
-            uop.opcode := CSR_Op.CSR_R.asUInt
-          }.otherwise{
-            uop.opcode := CSR_Op.CSR_RC.asUInt
-          }
-
-          invalidEnc := false.B
-        }
-
-        is (5.U) {
-          //atomically reads the current value of a CSR register into rd, then writes a new value into that CSR.
-          // uses the imm field to read/write and not a GPR
-          uop.fu := FU_t.FU_CSR
-          uop.rd := rd
-          uop.opcode := CSR_Op.CSR_RW_I.asUInt
-          uop.imm := Cat(instr(19,15), instr(31,20))
-          invalidEnc := false.B
-        }
-
-        is (6.U) {
-          uop.fu := FU_t.FU_CSR
-          uop.rd := rd
-
-          when (rs1 === 0.U) {
-            uop.opcode := CSR_Op.CSR_R.asUInt
-          }.otherwise{
-            uop.opcode := CSR_Op.CSR_RS_I.asUInt
-          }
-
-          invalidEnc := false.B
-        }
-
-        is (7.U ) {
-          uop.fu := FU_t.FU_CSR
-          uop.rd := rd
-
-          when (rs1 === 0.U) {
-            uop.opcode := CSR_Op.CSR_R.asUInt
-          }.otherwise{
-            uop.opcode := CSR_Op.CSR_RC_I.asUInt
-          }
-          invalidEnc := false.B
-        }
-      }
     }
   }
 
@@ -599,7 +602,7 @@ class InstrDecoder(params: iFetchParams) extends Module {
         }
       }
     }
-  }
+
 
   //The pipeline needs to drain and take the illegal instruction trap before anything else executes.
   // After opcode switch — catch-all for unrecognized encodings
@@ -611,5 +614,9 @@ class InstrDecoder(params: iFetchParams) extends Module {
     decBranch.wfi       := true.B
     decBranch.fetchID   := uop.fetchID
     decBranch.fetchOffs := uop.fetchOffs
+
   }
+
+  io.out       := uop
+  io.outBranch := Mux(decBranch.taken, decBranch, io.inBranch)
 }

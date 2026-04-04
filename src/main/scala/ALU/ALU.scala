@@ -44,16 +44,16 @@ class ALU(
     val cdbData  = Output(UInt(32.W))
   })
 
-  // ---- Sub-unit instantiation ------------------------------------------
+  //Sub-unit instantiation
   val intALU     = Module(new IntALU)
   val branchUnit = Module(new BranchUnit)
 
-  // ---- Wire inputs to both sub-units -----------------------------------
+  //Wire inputs to both sub-units
   // Both receive the same uop — each gates its output on its own fu check
   intALU.io.in     := io.in
   branchUnit.io.in := io.in
 
-  // ---- Default outputs -------------------------------------------------
+  //Default outputs
   io.wrEn        := false.B
   io.wrAddr      := 0.U
   io.wrData      := 0.U

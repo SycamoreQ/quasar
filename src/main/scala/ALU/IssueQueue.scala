@@ -75,7 +75,7 @@ class IssueQueue(WIDTH:Int = 8 , NUM_ENQ:Int = 4 , NUM_CDB:Int = 8)(params:iFetc
   for (i <- 0 until NUM_ENQ) {
 
     val availSlots = freeSlots & ~claimedMask
-    val freeIdx = PriorityEncoder(freeSlots)
+    val freeIdx = PriorityEncoder(availSlots)
     when(io.in_enqValid(i) && io.in_uop(i).valid) {
       // Find free slot — each iteration needs its own PriorityEncoder
       // accounting for slots taken by earlier iterations
@@ -95,15 +95,15 @@ class IssueQueue(WIDTH:Int = 8 , NUM_ENQ:Int = 4 , NUM_CDB:Int = 8)(params:iFetc
   for (i <- 0 until WIDTH) {
     for (j <- 0 until NUM_CDB) {
       when (io.in_cdb(j).tag === entry(i).uop.tagA){
-        entry(i).uop.availA := true.B
+        entry(i).availA := true.B
       }
 
       when (io.in_cdb(j).tag === entry(i).uop.tagB){
-        entry(i).uop.availB := true.B
+        entry(i).availB := true.B
       }
 
       when (io.in_cdb(j).tag === entry(i).uop.tagC){
-        entry(i).uop.availC := true.B
+        entry(i).availC := true.B
       }
     }
   }
@@ -131,7 +131,6 @@ class IssueQueue(WIDTH:Int = 8 , NUM_ENQ:Int = 4 , NUM_CDB:Int = 8)(params:iFetc
   io.out_uop   := 0.U.asTypeOf(new ExecUOp)
 
   when (found) {
-     for (i <- 0 until NUM_CDB){
        io.out_rdA := entry(bestIdx).uop.tagA(6, 0)  // strip MSB special flag
        io.out_rdB := entry(bestIdx).uop.tagB(6, 0)
 
@@ -145,9 +144,8 @@ class IssueQueue(WIDTH:Int = 8 , NUM_ENQ:Int = 4 , NUM_CDB:Int = 8)(params:iFetc
        io.out_uop   := execUop
 
        io.out_valid := true.B
-       entry(i).uop.valid := true.B
+       entry(bestIdx).uop.valid := true.B
 
-     }
   }
 
   when(io.in_branch.taken) {
@@ -159,7 +157,4 @@ class IssueQueue(WIDTH:Int = 8 , NUM_ENQ:Int = 4 , NUM_CDB:Int = 8)(params:iFetc
     }
   }
 
-  for (i <- 0 until NUM_ENQ){
-    io.out_uop(i).pc := io.in_uop(i).pc
-  }
 }
