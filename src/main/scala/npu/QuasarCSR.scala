@@ -44,12 +44,13 @@ object QuasarCSRAddr {
     QSR_CTRL, QSR_STATUS, QSR_BASE_ADDR,
     QSR_OUT_ADDR, QSR_SHAPE, QSR_CMD
   )
-
-  // Is a given 12-bit address one of ours?
   def isNpuCSR(addr: UInt): Bool = {
-    val inRange = (addr >= 0x800.U) && (addr <= 0x805.U)
+    (addr >= 0x800.U) && (addr <= 0x805.U)
+  }
 
-    inRange
+  // VERSION B: For Software (used in your Tests)
+  def isNpuCSR(addr: Int): Boolean = {
+    addr >= 0x800 && addr <= 0x805
   }
 }
 
@@ -138,12 +139,12 @@ class QuasarCSRFile(xlen: Int) extends Module {
     QuasarCSRAddr.QSR_CMD       -> cmd_reg,
   ))
 
-  ctrl_reg(0) := io.dispatch
-  ctrl_reg(1) := io.npu_reset
-  io.shape_m := shape_reg(15,0)
-  io.shape_n := shape_reg(31, 16)
-  io.cmd := cmd_reg(3,0)
-  io.dispatch  := ctrl_reg(0)
+  io.dispatch := ctrl_reg(0)
   io.npu_reset := ctrl_reg(1)
+  io.base_addr := base_addr_reg
+  io.out_addr := out_addr_reg
+  io.shape_m := shape_reg(15, 0)
+  io.shape_n := shape_reg(31, 16)
+  io.cmd := cmd_reg(3, 0)
 
 }

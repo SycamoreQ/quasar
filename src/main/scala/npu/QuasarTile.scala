@@ -31,11 +31,17 @@ class QuasarTileIO(xlen: Int, nastiParams: NastiBundleParameters) extends Bundle
  */
 class QuasarNpuTop(xlen: Int) extends Module {
   val io = IO(new Bundle {
-    val csr = new QuasarCSRIO(xlen)
+    val csr = Flipped(new QuasarCSRIO(xlen))
   })
 
-  io.csr.npu_busy  := false.B
-  io.csr.npu_done  := true.B
+  //stub inits
+  io.csr.waddr := 0.U
+  io.csr.wen   := false.B
+  io.csr.wdata := 0.U
+  io.csr.raddr := 0.U
+
+  io.csr.npu_busy := false.B
+  io.csr.npu_done := true.B
   io.csr.npu_error := false.B
 }
 
@@ -55,9 +61,7 @@ class QuasarTile(
   io.host  <> host_tile.io.host
   io.nasti <> host_tile.io.nasti
 
-  csr_file.io.npu_busy  := npu_top.io.csr.npu_busy
-  csr_file.io.npu_done := npu_top.io.csr.npu_done
-  csr_file.io.npu_error := npu_top.io.csr.npu_error
+  csr_file.io <> npu_top.io.csr
 
   //todo: tie off host write/read ports for now (Phase 5 wires these for real)
   csr_file.io.wen := false.B
