@@ -1,7 +1,6 @@
 package npu
 
 import chisel3._
-import chisel3.util._
 
 /**
  * QuasarPEParams: compile-time configuration for one Processing Element.
