@@ -43,7 +43,7 @@ class QuasarPETests extends AnyFlatSpec with ChiselScalatestTester {
     dut.io.weight_load.poke(false.B)
   }
 
-  def flush(dut: QuasarPE, cycles: Int = 4): Unit = {
+  def flush(dut: QuasarPE, cycles: Int = 3): Unit = {
     driveAct(dut, 0, 0, valid = false)
     dut.clock.step(cycles)
   }
@@ -80,7 +80,10 @@ class QuasarPETests extends AnyFlatSpec with ChiselScalatestTester {
       loadWeight(dut, 3)
       driveAct(dut, 4, psum = 0, valid = true, clear = true)
       dut.clock.step(1)
-      flush(dut, 4)
+      driveAct(dut, 0, 0, valid = false)
+      dut.clock.step(1)
+      dut.clock.step(1)
+      dut.clock.step(1)
       dut.io.valid_out.expect(true.B)
       dut.io.psum_out.expect(12.S)
     }
@@ -95,7 +98,10 @@ class QuasarPETests extends AnyFlatSpec with ChiselScalatestTester {
       loadWeight(dut, 2)
       driveAct(dut, 5, psum = 100, valid = true, clear = true)
       dut.clock.step(1)
-      flush(dut, 4)
+      driveAct(dut, 0, psum = 100, valid = false)
+      dut.clock.step(1)
+      dut.clock.step(1)
+      dut.clock.step(1)
       dut.io.valid_out.expect(true.B)
       dut.io.psum_out.expect(110.S)
     }
@@ -139,15 +145,17 @@ class QuasarPETests extends AnyFlatSpec with ChiselScalatestTester {
   it should "accumulate a dot product and add psum_in" in {
     test(new QuasarPE()) { dut =>
       loadWeight(dut, 2)
-
       driveAct(dut, 1, psum = 10, valid = true, clear = true)
       dut.clock.step(1)
       driveAct(dut, 3, psum = 10, valid = true, clear = false)
       dut.clock.step(1)
       driveAct(dut, 5, psum = 10, valid = true, clear = false)
       dut.clock.step(1)
-
-      flush(dut, 4)
+      // pipeline drain — keep psum_in=10 so it's present when valid_out fires
+      driveAct(dut, 0, psum = 10, valid = false)
+      dut.clock.step(1)
+      dut.clock.step(1)
+      dut.clock.step(1)
       dut.io.valid_out.expect(true.B)
       dut.io.psum_out.expect(28.S)
     }
@@ -164,15 +172,20 @@ class QuasarPETests extends AnyFlatSpec with ChiselScalatestTester {
       loadWeight(dut, 3)
       driveAct(dut, 4, psum = 0, valid = true, clear = true)
       dut.clock.step(1)
-      flush(dut, 4)
+      driveAct(dut, 0, 0, valid = false)
+      dut.clock.step(1)
+      dut.clock.step(1)
+      dut.clock.step(1)
       dut.io.valid_out.expect(true.B)
       dut.io.psum_out.expect(12.S)
 
-      // Reload weight and run second computation
       loadWeight(dut, 5)
       driveAct(dut, 6, psum = 0, valid = true, clear = true)
       dut.clock.step(1)
-      flush(dut, 4)
+      driveAct(dut, 0, 0, valid = false)
+      dut.clock.step(1)
+      dut.clock.step(1)
+      dut.clock.step(1)
       dut.io.valid_out.expect(true.B)
       dut.io.psum_out.expect(30.S)
     }
@@ -186,7 +199,10 @@ class QuasarPETests extends AnyFlatSpec with ChiselScalatestTester {
       loadWeight(dut, -3)
       driveAct(dut, 4, psum = 0, valid = true, clear = true)
       dut.clock.step(1)
-      flush(dut, 4)
+      driveAct(dut, 0, 0, valid = false)
+      dut.clock.step(1)
+      dut.clock.step(1)
+      dut.clock.step(1)
       dut.io.valid_out.expect(true.B)
       dut.io.psum_out.expect(-12.S)
     }
