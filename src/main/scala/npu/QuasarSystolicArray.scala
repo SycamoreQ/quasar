@@ -80,7 +80,7 @@ class QuasarSystolicArrayIO(p: QuasarArrayParams) extends Bundle {
   val clear    = Input(Bool())
   val weights  = new WeightLoadIO(p)
   val psum_out = Output(Vec(p.cols, SInt(p.psumBits.W)))
-  val valid_out = Output(Bool())
+  val valid_out = Output(Vec(p.cols, Bool()))
 }
 
 /**
@@ -130,41 +130,21 @@ class QuasarSystolicArray(val p: QuasarArrayParams = QuasarArrayParams()) extend
     Module(new QuasarPE(p.peParams))
   }
 
-  // ── YOUR LOGIC HERE — Horizontal wiring (activation flow) ──────────────
-  // For each row i:
-  //   Connect io.act_in(i) to pes(i)(0).io.act_in
-  //   For j > 0: connect pes(i)(j-1).io.act_out to pes(i)(j).io.act_in
-  // Hint: use a nested for loop:
-  //   for (i <- 0 until p.rows) {
-  //     for (j <- 0 until p.cols) { ... }
-  //   }
+  val valid_skewed = Wire(Vec(p.cols, Bool()))
+  val clear_skewed = Wire(Vec(p.cols, Bool()))
 
-  // ── YOUR LOGIC HERE — Vertical wiring (partial sum flow) ───────────────
-  // For each column j:
-  //   Connect 0.S to pes(0)(j).io.psum_in  (top boundary)
-  //   For i > 0: connect pes(i-1)(j).io.psum_out to pes(i)(j).io.psum_in
+  // Column 0: no delay
+  valid_skewed(0) := io.valid_in
+  clear_skewed(0) := io.clear
 
-  // ── YOUR LOGIC HERE — Control broadcast ────────────────────────────────
-  // For ALL PEs (i, j):
-  //   pe.io.valid_in   ← io.valid_in
-  //   pe.io.clear      ← io.clear
-  //   pe.io.weight_load← io.weights.weight_load
-  //   pe.io.weight_data← io.weights.weight_data(i)(j)
-  // Hint: combine this with the horizontal/vertical loops above
-  // so you only iterate once
-
-  // ── YOUR LOGIC HERE — TSV stub tie-off ─────────────────────────────────
-  // For ALL PEs (i, j):
-  //   pe.io.tsv_port.resp_valid := false.B
-  //   pe.io.tsv_port.resp_data  := 0.U
-  // (The req_* outputs from the PE go nowhere in Phase 3 — DontCare)
-
-  // ── YOUR LOGIC HERE — Output collection ────────────────────────────────
-  // For each column j:
-  //   io.psum_out(j) ← pes(rows-1)(j).io.psum_out
-
-  // ── YOUR LOGIC HERE — Array valid_out ──────────────────────────────────
-  // io.valid_out ← pes(rows-1)(0).io.valid_out
+  for (j <- 1 until p.cols) {
+    val vReg = RegInit(false.B)
+    val cReg = RegInit(false.B)
+    vReg := valid_skewed(j-1)
+    cReg := clear_skewed(j-1)
+    valid_skewed(j) := vReg
+    clear_skewed(j) := cReg
+  }
 
   for (i <- 0 until p.rows) {
     for (j <- 0 until p.cols) {
@@ -185,6 +165,8 @@ class QuasarSystolicArray(val p: QuasarArrayParams = QuasarArrayParams()) extend
       pe.io.clear       := io.clear
       pe.io.weight_load := io.weights.weight_load
       pe.io.weight_data := io.weights.weight_data(i)(j)
+      pe.io.valid_in := valid_skewed(j)
+      pe.io.clear    := clear_skewed(j)
 
       pe.io.tsv_port.resp_valid := false.B
       pe.io.tsv_port.resp_data  := 0.U
@@ -195,5 +177,7 @@ class QuasarSystolicArray(val p: QuasarArrayParams = QuasarArrayParams()) extend
     io.psum_out(j) := pes(p.rows - 1)(j).io.psum_out
   }
 
-  io.valid_out := pes(p.rows - 1)(0).io.valid_out
+  for (j <- 0 until p.cols) {
+    io.valid_out(j) := pes(p.rows-1)(j).io.valid_out
+  }
 }
